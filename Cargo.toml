@@ -1,9 +1,11 @@
 [package]
 name = "phonoscope"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 gtk4 = "0.4.8"
+glib = "0.15.12"
+mpris = "1.1.2"
