@@ -2,7 +2,6 @@ mod ui;
 
 use gtk4::prelude::*;
 use clap::Parser;
-use gtk4::glib;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -64,7 +63,7 @@ fn main() {
 
             print_player_information(&player);
 
-            let closure = glib::clone!(@weak title, @weak lyrics => @default-panic, move || {
+            let closure = move || {
                 let metadata = player.get_metadata().unwrap();
                 let track = metadata.title();
 
@@ -95,7 +94,7 @@ fn main() {
                 }
 
                 glib::Continue(true)
-            });
+            };
 
             let refresh_interval = std::time::Duration::from_millis(1000);
             glib::timeout_add_local(refresh_interval, closure);
