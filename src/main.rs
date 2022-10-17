@@ -19,6 +19,12 @@ struct Arguments {
     source: Option<String>
 }
 
+fn get_players<'a>() -> Vec<mpris::Player<'a>> {
+    // TODO: Do we really need to create a new PlayerFinder instance every time?
+    let finder = mpris::PlayerFinder::new().expect("D-Bus communication error occurred.");
+    finder.find_all().expect("D-Bus communication error occurred.")
+}
+
 fn print_player_information(player: &mpris::Player) {
     let identity = player.identity();
     let unique_name = player.unique_name();
@@ -29,80 +35,66 @@ fn print_player_information(player: &mpris::Player) {
         Err(_) => "Unable to ascertain current track."
     };
 
-    println!("{identity} (bus name {unique_name}): {title}");
+    println!("Found player: {identity} (bus name {unique_name}) ({title})");
 }
 
 fn main() {
+    let app = gtk4::Application::builder()
+        .application_id("dev.larrabyte.phonoscope")
+        .build();
+
     let args = Arguments::parse();
-    let finder = mpris::PlayerFinder::new().expect("D-Bus communication error occurred.");
 
     if args.list_all_players {
-        finder.find_all().expect("D-Bus communication error occurred.").iter().for_each(print_player_information);
+        get_players().iter().for_each(print_player_information);
+        return;
     }
 
-    else {
-        let app = gtk4::Application::builder()
-            .application_id("dev.larrabyte.phonoscope")
-            .build();
+    app.connect_activate(move |app| {
+        let players = get_players();
+        let player = match &args.identity {
+            Some(identity) => players.into_iter().find(|p| {identity == p.identity()}).expect("No MPRIS player with specified identity found."),
+            None => players.into_iter().next().expect("No active MPRIS players found.")
+        };
 
-        app.connect_activate(move |app| {
-            let (window, title, lyrics) = ui::build_ui(app);
-            let players = finder.find_all().expect("D-Bus communication error occurred.");
+        print_player_information(&player);
 
-            // TODO: Allow application startup even with no active player.
-            // TODO: Pick the "currently active" (eg. most recently used) player.
-            let player = match &args.identity {
-                Some(identity) => players.into_iter().find(|p| {p.identity() == identity}).expect("No MPRIS players with specified identity found."),
-                None => players.into_iter().next().expect("No MPRIS players found.") 
-            };
+        let (window, title, lyrics) = ui::build_ui(app);
+        let anchor = args.source.clone().unwrap_or_else(|| "./".to_string());
 
-            let source_directory = match &args.source {
-                Some(path) => std::path::PathBuf::from(path),
-                None => panic!("Source lyric directory required!")
-            };
+        // TODO: Address intermittent metadata failures when rapidly switching tracks.
+        glib::timeout_add_seconds_local(1, move || {
+            let metadata = player.get_metadata().unwrap();
+            let track = metadata.title();
 
-            print_player_information(&player);
+            match track {
+                Some(name) if name != title.text().as_str() => {
+                    let path = anchor.clone() + "/" + name + ".lyrics";
+                    title.set_text(name);
 
-            let closure = move || {
-                let metadata = player.get_metadata().unwrap();
-                let track = metadata.title();
+                    match std::fs::read_to_string(&path) {
+                        // TODO: Ruby character rendering.
+                        // TODO: Synchronised lyric rendering.
+                        Ok(text) => lyrics.set_text(&text),
+                        Err(err) => lyrics.set_text(format!("{}: {}", err, path).as_ref())
+                    }
+                },
 
-                // Transitioning from some track -> no track.
-                if track.is_none() && title.text().as_str() != "No track currently playing." {
+                None if title.text().as_str() != "No track currently playing." => {
                     title.set_text("No track currently playing.");
                     lyrics.set_text("No lyrics available for display.");
-                }
+                },
 
-                // Transitioning from no track -> some track or some track -> some track.
-                else {
-                    let name = track.unwrap();
-                    if name != title.text().as_str() {
-                        let mut path = source_directory.clone();
-                        path.push(name.to_owned() + ".lyrics");
-                        title.set_text(name);
-    
-                        match std::fs::read_to_string(&path) {
-                            Ok(text) => lyrics.set_text(&text),
-    
-                            Err(err) => {
-                                let reason = err.to_string();
-                                let message = format!("{reason} at {path:?}");
-                                lyrics.set_text(&message);
-                            }
-                        };
-                    }
-                }
+                Some(_) | None => {}
+            }
 
-                glib::Continue(true)
-            };
-
-            let refresh_interval = std::time::Duration::from_millis(1000);
-            glib::timeout_add_local(refresh_interval, closure);
-            window.present();
+            glib::Continue(true)
         });
 
-        // Prevent GTK from handling any arguments.
-        let arguments: Vec<&str> = Vec::new();
-        app.run_with_args(&arguments);
-    }
+        window.show();
+    });
+
+    // Prevent GTK from handing any arguments.
+    let nothing: Vec<&str> = Vec::new();
+    app.run_with_args(&nothing);
 }
