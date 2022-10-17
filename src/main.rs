@@ -1,7 +1,13 @@
+mod players;
+mod ruby;
 mod ui;
 
+use glib::{timeout_add_seconds_local, Continue};
+use std::cell::RefCell;
+use gtk4::Application;
 use gtk4::prelude::*;
 use clap::Parser;
+use ruby::Line;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -19,64 +25,44 @@ struct Arguments {
     source: Option<String>
 }
 
-fn get_players<'a>() -> Vec<mpris::Player<'a>> {
-    // TODO: Do we really need to create a new PlayerFinder instance every time?
-    let finder = mpris::PlayerFinder::new().expect("D-Bus communication error occurred.");
-    finder.find_all().expect("D-Bus communication error occurred.")
-}
-
-fn print_player_information(player: &mpris::Player) {
-    let identity = player.identity();
-    let unique_name = player.unique_name();
-    let metadata = player.get_metadata();
-
-    let title = match &metadata {
-        Ok(data) => data.title().unwrap_or("No track currently playing."),
-        Err(_) => "Unable to ascertain current track."
-    };
-
-    println!("Found player: {identity} (bus name {unique_name}) ({title})");
-}
-
 fn main() {
-    let app = gtk4::Application::builder()
+    let args = Arguments::parse();
+    let app = Application::builder()
         .application_id("dev.larrabyte.phonoscope")
         .build();
 
-    let args = Arguments::parse();
-
     if args.list_all_players {
-        get_players().iter().for_each(print_player_information);
-        return;
+        return players::all().iter().for_each(players::print);
     }
 
     app.connect_activate(move |app| {
-        let players = get_players();
+        let players = players::all();
         let player = match &args.identity {
             Some(identity) => players.into_iter().find(|p| {identity == p.identity()}).expect("No MPRIS player with specified identity found."),
             None => players.into_iter().next().expect("No active MPRIS players found.")
         };
 
-        print_player_information(&player);
+        players::print(&player);
 
         let (window, title, lyrics) = ui::build_ui(app);
-        let anchor = args.source.clone().unwrap_or_else(|| "./".to_string());
+
+        let anchor = args.source.clone().unwrap_or_else(|| ".".to_string());
+        let rubies: RefCell<Vec<Line>> = RefCell::new(Vec::new());
 
         // TODO: Address intermittent metadata failures when rapidly switching tracks.
-        glib::timeout_add_seconds_local(1, move || {
+        timeout_add_seconds_local(1, move || {
             let metadata = player.get_metadata().unwrap();
             let track = metadata.title();
 
             match track {
                 Some(name) if name != title.text().as_str() => {
-                    let path = anchor.clone() + "/" + name + ".lyrics";
                     title.set_text(name);
 
+                    let path = anchor.clone() + "/" + name + ".lyrics";
                     match std::fs::read_to_string(&path) {
-                        // TODO: Ruby character rendering.
-                        // TODO: Synchronised lyric rendering.
-                        Ok(text) => lyrics.set_text(&text),
-                        Err(err) => lyrics.set_text(format!("{}: {}", err, path).as_ref())
+                        // TODO: Gracefully reject invalid lyrics.
+                        Ok(data) => {rubies.replace(Line::from_filedata(&data));},
+                        Err(err) => {lyrics.set_text(format!("{}: {}", err, path).as_ref());}
                     }
                 },
 
@@ -88,7 +74,13 @@ fn main() {
                 Some(_) | None => {}
             }
 
-            glib::Continue(true)
+            // TODO: Render ruby text.
+            match players::current_line(&player, &rubies.borrow()) {
+                Some(lyric) => lyrics.set_text(&lyric.raw()),
+                None => {}
+            };
+
+            Continue(true)
         });
 
         window.show();

@@ -1,6 +1,6 @@
 [package]
 name = "phonoscope"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2021"
 authors = ["larrabyte"]
 description = "A (locally-sourced) MPRIS-based song lyrics display."
