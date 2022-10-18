@@ -2,9 +2,10 @@ mod players;
 mod ruby;
 mod ui;
 
+use gtk4::{Application, Label, CssProvider, Orientation, StyleContext};
 use glib::{timeout_add_seconds_local, Continue};
 use std::cell::RefCell;
-use gtk4::Application;
+use gtk4::gdk::Display;
 use gtk4::prelude::*;
 use clap::Parser;
 use ruby::Line;
@@ -25,6 +26,12 @@ struct Arguments {
     source: Option<String>
 }
 
+fn clear(lyrics: &gtk4::Box, widgets: &RefCell<Vec<gtk4::Box>>) {
+    let mut children = widgets.borrow_mut();
+    children.iter().for_each(|w| lyrics.remove(w));
+    children.clear();
+}
+
 fn main() {
     let args = Arguments::parse();
     let app = Application::builder()
@@ -34,6 +41,19 @@ fn main() {
     if args.list_all_players {
         return players::all().iter().for_each(players::print);
     }
+
+    app.connect_startup(|_| {
+        // Load default CSS.
+        let provider = CssProvider::new();
+        let data = include_bytes!("style.css");
+        provider.load_from_data(data);
+
+        StyleContext::add_provider_for_display(
+            &Display::default().expect("Could not connect to a display."),
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    });
 
     app.connect_activate(move |app| {
         let players = players::all();
@@ -59,34 +79,58 @@ fn main() {
 
             match track {
                 Some(name) if name != title.text().as_str() => {
+                    let path = anchor.clone() + "/" + name + ".lyrics";
+                    clear(&lyrics, &widgets);
                     title.set_text(name);
 
-                    let path = anchor.clone() + "/" + name + ".lyrics";
                     match std::fs::read_to_string(&path) {
                         // TODO: Gracefully reject invalid lyrics.
-                        Ok(data) => {rubies.replace(Line::from_filedata(&data));},
-                        Err(err) => {println!("{err:?}");}
+                        Ok(data) => {
+                            rubies.replace(Line::from_filedata(&data));
+                        },
+
+                        Err(err) => {
+                            let mut children = widgets.borrow_mut();
+                            let widget = gtk4::Box::new(Orientation::Horizontal, 0);
+                            let error = format!("{}: {}", err, path);
+                            let text = Label::new(Some(&error));
+                            widget.append(&text);
+                            widget.show();
+
+                            lyrics.append(&widget);
+                            children.push(widget);
+                        }
                     }
                 },
 
                 None if title.text().as_str() != "No track currently playing." => {
                     title.set_text("No track currently playing.");
+                    clear(&lyrics, &widgets);
                 },
 
                 Some(_) | None => {}
             }
 
             if let Some(line) = players::current_line(&player, &rubies.borrow()) {
-                // Clear the old line's contents off the display.
+                clear(&lyrics, &widgets);
                 let mut children = widgets.borrow_mut();
-                children.iter().for_each(|w| lyrics.remove(w));
-                children.clear();
 
                 // Insert the new line's contents.
                 for lyric in &line.lyrics {
-                    let widget = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-                    let text = gtk4::Label::new(Some(&lyric.characters));
-                    let reading = gtk4::Label::new(lyric.reading.as_deref());
+                    let widget = gtk4::Box::builder()
+                        .orientation(Orientation::Vertical)
+                        .valign(gtk4::Align::End)
+                        .build();
+
+                    let text = Label::builder()
+                        .label(&lyric.characters)
+                        .css_name("characters")
+                        .build();
+
+                    let reading = Label::builder()
+                        .label(lyric.reading.as_deref().unwrap_or(""))
+                        .css_name("reading")
+                        .build();
 
                     widget.append(&reading);
                     widget.append(&text);
