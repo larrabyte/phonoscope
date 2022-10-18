@@ -3,8 +3,9 @@ mod ruby;
 mod ui;
 
 use gtk4::{Application, Label, CssProvider, Orientation, StyleContext};
-use glib::{timeout_add_seconds_local, Continue};
+use glib::{Continue, timeout_add_local};
 use std::cell::RefCell;
+use std::time::Duration;
 use gtk4::gdk::Display;
 use gtk4::prelude::*;
 use clap::Parser;
@@ -73,7 +74,8 @@ fn main() {
         let rubies: RefCell<Vec<Line>> = RefCell::default();
 
         // TODO: Address intermittent metadata failures when rapidly switching tracks.
-        timeout_add_seconds_local(1, move || {
+        let refresh_interval = Duration::from_millis(100);
+        timeout_add_local(refresh_interval, move || {
             let metadata = player.get_metadata().unwrap();
             let track = metadata.title();
 
