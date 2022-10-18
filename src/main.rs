@@ -44,10 +44,13 @@ fn main() {
 
         players::print(&player);
 
-        let (window, title, lyrics) = ui::build_ui(app);
+        // Source directory for lyrics. Cloned here to avoid the wrath of the borrow checker.
+        let anchor = args.source.clone().unwrap_or_else(|| "./lyrics".to_string());
 
-        let anchor = args.source.clone().unwrap_or_else(|| ".".to_string());
-        let rubies: RefCell<Vec<Line>> = RefCell::new(Vec::new());
+        // UI elements for the display closure below.
+        let (window, title, lyrics) = ui::build_ui(app);
+        let widgets: RefCell<Vec<gtk4::Box>> = RefCell::default();
+        let rubies: RefCell<Vec<Line>> = RefCell::default();
 
         // TODO: Address intermittent metadata failures when rapidly switching tracks.
         timeout_add_seconds_local(1, move || {
@@ -62,23 +65,36 @@ fn main() {
                     match std::fs::read_to_string(&path) {
                         // TODO: Gracefully reject invalid lyrics.
                         Ok(data) => {rubies.replace(Line::from_filedata(&data));},
-                        Err(err) => {lyrics.set_text(format!("{}: {}", err, path).as_ref());}
+                        Err(err) => {println!("{err:?}");}
                     }
                 },
 
                 None if title.text().as_str() != "No track currently playing." => {
                     title.set_text("No track currently playing.");
-                    lyrics.set_text("No lyrics available for display.");
                 },
 
                 Some(_) | None => {}
             }
 
-            // TODO: Render ruby text.
-            match players::current_line(&player, &rubies.borrow()) {
-                Some(lyric) => lyrics.set_text(&lyric.raw()),
-                None => {}
-            };
+            if let Some(line) = players::current_line(&player, &rubies.borrow()) {
+                // Clear the old line's contents off the display.
+                let mut children = widgets.borrow_mut();
+                children.iter().for_each(|w| lyrics.remove(w));
+                children.clear();
+
+                // Insert the new line's contents.
+                for lyric in &line.lyrics {
+                    let widget = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+                    let text = gtk4::Label::new(Some(&lyric.characters));
+                    let reading = gtk4::Label::new(lyric.reading.as_deref());
+
+                    widget.append(&reading);
+                    widget.append(&text);
+                    widget.show();
+                    lyrics.append(&widget);
+                    children.push(widget);
+                }
+            }
 
             Continue(true)
         });

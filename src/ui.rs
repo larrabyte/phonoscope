@@ -1,8 +1,8 @@
-use gtk4::prelude::*;
+use gtk4::{Application, ApplicationWindow, Label};
 
-pub fn build_ui(app: &gtk4::Application) -> (gtk4::ApplicationWindow, gtk4::Label, gtk4::Label) {
+pub fn build_ui(app: &Application) -> (ApplicationWindow, Label, gtk4::Box) {
     let container = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
+        .orientation(gtk4::Orientation::Horizontal)
         .margin_top(12)
         .margin_bottom(12)
         .margin_start(12)
@@ -19,26 +19,14 @@ pub fn build_ui(app: &gtk4::Application) -> (gtk4::ApplicationWindow, gtk4::Labe
         .margin_end(12)
         .build();
 
-    let lyrics = gtk4::Label::builder()
-        .label("No lyrics available for display.")
-        .single_line_mode(false)
-        .wrap(false)
-        .margin_top(12)
-        .margin_bottom(12)
-        .margin_start(12)
-        .margin_end(12)
-        .build();
-
-    container.append(&title);
-    container.append(&lyrics);
-
-    let window = gtk4::ApplicationWindow::builder()
+    let window = ApplicationWindow::builder()
         .application(app)
         .default_width(128)
         .default_height(72)
         .title("Phonoscope")
+        .child(&title)
         .child(&container)
         .build();
 
-    (window, title, lyrics)
+    (window, title, container)
 }
