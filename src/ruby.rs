@@ -26,10 +26,6 @@ impl Ruby {
 }
 
 impl Line {
-    pub fn raw(&self) -> String {
-        self.lyrics.iter().map(|l| l.characters.clone()).collect()
-    }
-
     pub fn from_formatted(line: &str) -> Self {
         // (minutes):(seconds):(milliseconds) is guaranteed to take up (2+2+3=9) characters on a valid line.
         let integers = line[0..8].split(':').map(|e| e.parse::<u32>().unwrap()).collect::<Vec<u32>>();
