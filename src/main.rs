@@ -92,6 +92,7 @@ fn main() {
                         },
 
                         Err(err) => {
+                            rubies.borrow_mut().clear();
                             let mut children = widgets.borrow_mut();
                             let widget = gtk4::Box::new(Orientation::Horizontal, 0);
                             let error = format!("{}: {}", err, path);
@@ -108,6 +109,7 @@ fn main() {
                 None if title.text().as_str() != "No track currently playing." => {
                     title.set_text("No track currently playing.");
                     clear(&lyrics, &widgets);
+                    rubies.borrow_mut().clear();
                 },
 
                 Some(_) | None => {}
