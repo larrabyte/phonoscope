@@ -95,7 +95,7 @@ impl Worker for Parser {
     fn update(&mut self, event: Self::Input, sender: relm::ComponentSender<Self>) {
         match event {
             Event::Parse(path) => {
-                let path = String::from("./lyrics/") + &path + ".lyrics";
+                let path = String::from("./lyrics/") + &path + ".lrc";
                 let path = PathBuf::from(path).canonicalize();
                 let data = path.and_then(fs::read_to_string);
 
