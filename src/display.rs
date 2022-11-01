@@ -144,10 +144,13 @@ impl Component for Display {
                                 .css_name("reading")
                                 .label(ruby.reading.as_deref().unwrap_or(""))
                                 .build();
-    
+
+                            // Since whitespace characters are parsed to empty strings, we convert them when displaying.
+                            let characters = if ruby.characters.is_empty() {" "} else {&ruby.characters};
+
                             let characters = gtk::Label::builder()
                                 .css_name("characters")
-                                .label(&ruby.characters)
+                                .label(characters)
                                 .build();
     
                             wrapper.append(&reading);
