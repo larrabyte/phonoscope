@@ -1,156 +1,108 @@
-mod players;
-mod ruby;
-mod ui;
+mod display;
+mod selector;
+mod warden;
+mod parser;
 
-use gtk4::{Application, Label, CssProvider, Orientation, StyleContext};
-use glib::{Continue, timeout_add_local};
-use std::cell::RefCell;
-use std::time::Duration;
-use gtk4::gdk::Display;
-use gtk4::prelude::*;
-use clap::Parser;
-use ruby::Line;
+use std::{convert::identity, time::Duration};
+use selector::Selector;
+use gtk::Orientation;
+use display::Display;
 
-#[derive(Parser, Debug)]
-#[command(author, version, about)]
-struct Arguments {
-    /// List all detected players and then exit.
-    #[arg(short, long, default_value_t = false)]
-    list_all_players: bool,
+use relm::prelude::*;
+use adw::prelude::*;
 
-    /// MPRIS identity of the player to target.
-    #[arg(short, long)]
-    identity: Option<String>,
-
-    /// Directory where lyrics are stored.
-    #[arg(short, long)]
-    source: Option<String>
+pub struct Application {
+    display: Controller<Display>
 }
 
-fn clear(lyrics: &gtk4::Box, widgets: &RefCell<Vec<gtk4::Box>>) {
-    let mut children = widgets.borrow_mut();
-    children.iter().for_each(|w| lyrics.remove(w));
-    children.clear();
+pub struct Widgets {
+    title: adw::WindowTitle
+}
+
+#[derive(Debug)]
+pub enum Event {
+    Track(Option<String>),
+    Poll(Duration),
+    Reset
+}
+
+impl Component for Application {
+    type CommandOutput = ();
+    type Input = Event;
+    type Output = ();
+    type Init = ();
+    type Root = adw::Window;
+    type Widgets = Widgets;
+
+    fn init_root() -> Self::Root {
+        adw::Window::builder()
+            .default_width(800)
+            .default_height(200)
+            .build()
+    }
+
+    fn init(_: Self::Init, root: &Self::Root, sender: ComponentSender<Self>) -> ComponentParts<Self> {
+        let content = gtk::Box::new(Orientation::Vertical, 0);
+        let title = adw::WindowTitle::new("Phonoscope", "");
+        let header = adw::HeaderBar::builder()
+            .title_widget(&title)
+            .build();
+
+        // The window box (as in everything below the header).
+        let window = gtk::Box::builder()
+            .orientation(Orientation::Vertical)
+            .halign(gtk::Align::Center)
+            .valign(gtk::Align::Center)
+            .margin_start(24)
+            .margin_end(24)
+            .margin_top(24)
+            .margin_bottom(24)
+            .vexpand(true)
+            .build();
+
+        let selector = Selector::builder()
+            .launch(())
+            .forward(sender.input_sender(), identity);
+
+        let display = Display::builder()
+            .launch(())
+            .forward(sender.input_sender(), identity);
+
+        content.append(&header);
+        content.append(&window);
+
+        window.append(display.widget());
+        root.set_content(Some(&content));
+        header.pack_start(selector.widget());
+
+        let style = include_bytes!("style.css");
+        relm::set_global_css(style);
+
+        let model = Application {display};
+        let widgets = Widgets {title};
+        ComponentParts {model, widgets}
+    }
+
+    fn update_with_view(&mut self, widgets: &mut Self::Widgets, event: Self::Input, _: ComponentSender<Self>) {
+        match event {
+            Event::Track(Some(title)) => {
+                widgets.title.set_title(&title);
+                let message = display::Event::Initialise(title);
+                self.display.emit(message);
+            }
+
+            Event::Poll(timestamp) => {
+                let message = display::Event::Poll(timestamp);
+                self.display.emit(message);
+            }
+
+            Event::Track(_) => widgets.title.set_title("No track currently playing."),
+            Event::Reset => widgets.title.set_title("Phonoscope"),
+        }
+    }
 }
 
 fn main() {
-    let args = Arguments::parse();
-    let app = Application::builder()
-        .application_id("dev.larrabyte.phonoscope")
-        .build();
-
-    if args.list_all_players {
-        return players::all().iter().for_each(players::print);
-    }
-
-    app.connect_startup(|_| {
-        // Load default CSS.
-        let provider = CssProvider::new();
-        let data = include_bytes!("style.css");
-        provider.load_from_data(data);
-
-        StyleContext::add_provider_for_display(
-            &Display::default().expect("Could not connect to a display."),
-            &provider,
-            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-    });
-
-    app.connect_activate(move |app| {
-        let players = players::all();
-        let player = match &args.identity {
-            Some(identity) => players.into_iter().find(|p| {identity == p.identity()}).expect("No MPRIS player with specified identity found."),
-            None => players.into_iter().next().expect("No active MPRIS players found.")
-        };
-
-        players::print(&player);
-
-        // Source directory for lyrics. Cloned here to avoid the wrath of the borrow checker.
-        let anchor = args.source.clone().unwrap_or_else(|| "./lyrics".to_string());
-
-        // UI elements for the display closure below.
-        let (window, title, lyrics) = ui::build_ui(app);
-        let widgets: RefCell<Vec<gtk4::Box>> = RefCell::default();
-        let rubies: RefCell<Vec<Line>> = RefCell::default();
-
-        // TODO: Address intermittent metadata failures when rapidly switching tracks.
-        let refresh_interval = Duration::from_millis(100);
-        timeout_add_local(refresh_interval, move || {
-            let metadata = player.get_metadata().unwrap();
-            let track = metadata.title();
-
-            match track {
-                Some(name) if name != title.text().as_str() => {
-                    let path = anchor.clone() + "/" + name + ".lyrics";
-                    clear(&lyrics, &widgets);
-                    title.set_text(name);
-
-                    match std::fs::read_to_string(&path) {
-                        // TODO: Gracefully reject invalid lyrics.
-                        Ok(data) => {
-                            rubies.replace(Line::from_filedata(&data));
-                        },
-
-                        Err(err) => {
-                            rubies.borrow_mut().clear();
-                            let mut children = widgets.borrow_mut();
-                            let widget = gtk4::Box::new(Orientation::Horizontal, 0);
-                            let error = format!("{}: {}", err, path);
-                            let text = Label::new(Some(&error));
-                            widget.append(&text);
-                            widget.show();
-
-                            lyrics.append(&widget);
-                            children.push(widget);
-                        }
-                    }
-                },
-
-                None if title.text().as_str() != "No track currently playing." => {
-                    title.set_text("No track currently playing.");
-                    clear(&lyrics, &widgets);
-                    rubies.borrow_mut().clear();
-                },
-
-                Some(_) | None => {}
-            }
-
-            if let Some(line) = players::current_line(&player, &rubies.borrow()) {
-                clear(&lyrics, &widgets);
-                let mut children = widgets.borrow_mut();
-
-                // Insert the new line's contents.
-                for lyric in &line.lyrics {
-                    let widget = gtk4::Box::builder()
-                        .orientation(Orientation::Vertical)
-                        .valign(gtk4::Align::End)
-                        .build();
-
-                    let text = Label::builder()
-                        .label(&lyric.characters)
-                        .css_name("characters")
-                        .build();
-
-                    let reading = Label::builder()
-                        .label(lyric.reading.as_deref().unwrap_or(""))
-                        .css_name("reading")
-                        .build();
-
-                    widget.append(&reading);
-                    widget.append(&text);
-                    widget.show();
-                    lyrics.append(&widget);
-                    children.push(widget);
-                }
-            }
-
-            Continue(true)
-        });
-
-        window.show();
-    });
-
-    // Prevent GTK from handing any arguments.
-    let nothing: Vec<&str> = Vec::new();
-    app.run_with_args(&nothing);
+    let app = RelmApp::new("dev.larrabyte.phonoscope");
+    app.run::<Application>(());
 }

@@ -1,12 +1,12 @@
-title {
-	font-size: 48px;
-}
-
-characters {
-	font-size: 64px;
+error-description {
+	font-size: 24px;
 }
 
 reading {
 	font-size: 24px;
 	margin-bottom: -12px;
+}
+
+characters {
+	font-size: 64px;
 }
